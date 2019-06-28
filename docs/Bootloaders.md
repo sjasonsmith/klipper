@@ -276,3 +276,135 @@ start address of 16KiB. The easiest way to flash an application with
 this bootloader is to copy the application file (eg,
 `out/klipper.bin`) to a file named `firmware.bin` on an SD card, and
 then to reboot the micro-controller with that SD card.
+
+Running OpenOCD on the Raspberry PI
+===================================
+
+OpenOCD is a software package that can perform low-level chip flashing
+and debugging. It can use the GPIO pins on a Raspberry Pi to
+communicate with a variety of ARM chips.
+
+This section describes how one can install and launch OpenOCD.
+
+Begin by downloading and compiling the software (each step may take
+several minutes and the "make" step may take 30+ minutes):
+
+```
+sudo apt-get update
+sudo apt-get install autoconf libtool telnet
+mkdir ~/openocd
+cd ~/openocd/
+git clone http://openocd.zylin.com/openocd
+cd openocd
+./bootstrap
+./configure --enable-sysfsgpio --enable-bcm2835gpio --prefix=/home/pi/openocd/install
+make
+make install
+```
+
+## Configure OpenOCD
+
+Create an OpenOCD config file:
+
+```
+nano ~/openocd/openocd.cfg
+```
+
+Use a config similar to the following:
+
+```
+# Uses RPi pins: GPIO25 for SWDCLK, GPIO24 for SWDIO, GPIO18 for nRST
+source [find interface/raspberrypi2-native.cfg]
+bcm2835gpio_swd_nums 25 24
+bcm2835gpio_srst_num 18
+transport select swd
+
+# Set the chip (at91samd51j19 in this example)
+set CHIPNAME at91samd51j19
+source [find target/atsame5x.cfg]
+
+# Set the adapter speed
+adapter_khz 40
+adapter_nsrst_delay 100
+adapter_nsrst_assert_width 100
+
+# Enable remote GDB connections
+#bindto 0.0.0.0
+#gdb_port 44444
+
+init
+targets
+reset halt
+```
+
+The config is different for each chip. For example, a SAMD21 chip
+might use the following to set the chip:
+
+```
+set CHIPNAME at91samd21g18
+source [find target/at91samdXX.cfg]
+```
+
+## Wire the Raspberry Pi to the target chip
+
+Poweroff both the the Raspberry Pi and the target chip before wiring!
+Verify the target chip uses 3.3V prior to connecting to a Raspberry
+Pi!
+
+Connect GND, SWD_CLK, SWD_IO, and RST on the target chip to GND,
+GPIO25, GPIO24, and GPIO18 respectively on the Raspberry Pi.
+
+Then power up the Raspberry Pi and provide power to the target chip.
+
+Run OpenOCD:
+
+```
+cd ~/openocd/
+sudo ~/openocd/install/bin/openocd -f ~/openocd/openocd.cfg
+```
+
+## OpenOCD commands
+
+Once OpenOCD is running one can send it commands via telnet. Open
+another ssh session and run the following:
+
+```
+telnet 127.0.0.1 4444
+```
+
+For example, the commands to write a bootloader might look something
+like:
+
+```
+at91samd bootloader 0
+program bootloader-itsybitsy_m4-v2.0.0-adafruit.9.bin verify
+at91samd bootloader 16384
+```
+
+(One can exit telnet by pressing ctrl+] and then running the "quit"
+command.)
+
+## OpenOCD and gdb
+
+It is possible to use OpenOCD with gdb to debug Klipper. The following
+commands assume one is running gdb on a desktop class machine.
+
+Make sure OpenOCD is running on the Raspberry Pi and make sure the
+"bindto" and "gdb_port" options are configured in the openocd.cfg
+file.
+
+Then on the desktop machine run the following unix command:
+
+```
+cd ~/klipper/
+gdb out/klipper.elf
+```
+
+Within gdb run:
+
+```
+target remote octopi:44444
+```
+
+(Replace "octopi" with the host name of the Raspberry Pi.) Once gdb is
+running it is possible to set breakpoints and to inspect registers.
